@@ -1,9 +1,33 @@
-# Dependencies
+# ── Dependencies
 node_modules/
 .pnp
 .pnp.js
-.package-lock.json
-# Debug logs
+
+# ── Env & Secrets (IMPORTANT)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.sample
+
+# ── Vercel Specific
+.vercel
+.output
+
+# ── Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.npm
+
+# ── System Files
+.DS_Store
+Thumbs.db
+
+# ── Uploads (Testing ke liye)
+# Hum chahte hain ki jo images hum GitHub se bhej rahe hain wo save hon
+# Par local testing ki kachra files ignore hon
+# Isliye sirf contents ignore karenge, folder nahi
+public/uploads/*.tmp
+public/uploads/*.log
