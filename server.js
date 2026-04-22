@@ -7,6 +7,7 @@ const morgan    = require('morgan');
 const rateLimit = require('express-rate-limit');
 const path      = require('path');
 const fs        = require('fs');
+const { speedInsightsStatus, injectSpeedInsights } = require('./middleware/speedInsights');
 
 const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -83,6 +84,9 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.get('/api/health', (req, res) => {
   res.json({ success: true, status: 'ok', time: new Date().toISOString() });
 });
+
+// Speed Insights Status Endpoint
+app.get('/api/speed-insights', speedInsightsStatus);
 
 // Error Handling
 app.use((err, req, res, next) => {
