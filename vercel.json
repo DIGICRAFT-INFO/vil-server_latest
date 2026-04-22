@@ -5,12 +5,19 @@
       "src": "server.js",
       "use": "@vercel/node",
       "config": {
-        "installCommand": "npm install --legacy-peer-deps"
+        "includeFiles": ["public/uploads/**"]
       }
     }
   ],
-  "installCommand": "npm install --legacy-peer-deps",
   "routes": [
+    {
+      "src": "/uploads/(.*)",
+      "dest": "/public/uploads/$1"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "server.js"
+    },
     {
       "src": "/(.*)",
       "dest": "server.js"
