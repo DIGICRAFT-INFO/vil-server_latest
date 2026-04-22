@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
