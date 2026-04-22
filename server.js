@@ -4,25 +4,20 @@ const mongoose  = require('mongoose');
 const cors      = require('cors');
 const helmet    = require('helmet');
 const morgan    = require('morgan');
-const rateLimit = require('express-rate-limit');
 const path      = require('path');
 const fs        = require('fs');
 
 const app = express();
+const PORT = process.env.PORT || 10000; // Render use 10000 as default
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// --- SERVERLESS DB CONNECTION LOGIC ---
-let isConnected = false;
-const connectDB = async () => {
-  if (isConnected) return;
-  try {
-    const db = await mongoose.connect(process.env.MONGO_URI);
-    isConnected = db.connections[0].readyState;
-    console.log('✅ MongoDB Connected');
-  } catch (err) {
+// --- DATABASE CONNECTION (Standard Persistent Connection) ---
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('✅ MongoDB Connected (Render Native)'))
+  .catch((err) => {
     console.error('❌ MongoDB Error:', err.message);
-  }
-};
+    process.exit(1); // Stop server if DB fails
+  });
 
 // --- CORS CONFIGURATION ---
 const allowedOrigins = [
@@ -36,6 +31,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin || allowedOrigins.includes(origin)) {
       cb(null, true);
     } else {
@@ -43,24 +39,18 @@ app.use(cors({
     }
   },
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // --- MIDDLEWARES ---
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' })); // Increased for bulk data
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 if (NODE_ENV !== 'production') app.use(morgan('dev'));
 
-// Database injection middleware for Serverless
-app.use(async (req, res, next) => {
-  await connectDB();
-  next();
-});
-
-// --- STATIC FILES (Read Only on Vercel) ---
+// --- STATIC FILES (Read & Write enabled on Render) ---
 const uploadsPath = path.join(__dirname, 'public/uploads');
 if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true });
@@ -68,24 +58,35 @@ if (!fs.existsSync(uploadsPath)) {
 app.use('/uploads', express.static(uploadsPath));
 
 // --- ROUTES ---
-app.use('/api/auth',          require('./routes/auth'));
-app.use('/api/documents',     require('./routes/documents'));
-app.use('/api/news',          require('./routes/news'));
-app.use('/api/board-members', require('./routes/boardMembers'));
-app.use('/api/careers',       require('./routes/careers'));
-app.use('/api/contacts',      require('./routes/contacts'));
-app.use('/api/products',      require('./routes/products'));
-app.use('/api/settings',      require('./routes/settings'));
-app.use('/api/pages',         require('./routes/pageContent'));
-app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/auth',           require('./routes/auth'));
+app.use('/api/documents',      require('./routes/documents'));
+app.use('/api/news',           require('./routes/news'));
+app.use('/api/board-members',  require('./routes/boardMembers'));
+app.use('/api/careers',        require('./routes/careers'));
+app.use('/api/contacts',       require('./routes/contacts'));
+app.use('/api/products',       require('./routes/products'));
+app.use('/api/settings',       require('./routes/settings'));
+app.use('/api/pages',          require('./routes/pageContent'));
+app.use('/api/notifications',  require('./routes/notifications'));
+
+// Root Route (To prevent 404 on '/')
+app.get('/', (req, res) => {
+  res.send('Vaswani Industries Backend is Running...');
+});
 
 // Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, status: 'ok', time: new Date().toISOString() });
+  res.json({ 
+    success: true, 
+    status: 'ok', 
+    environment: NODE_ENV,
+    time: new Date().toISOString() 
+  });
 });
 
-// Error Handling
+// Error Handling Middleware
 app.use((err, req, res, next) => {
+  console.error(err.stack);
   const status = err.status || 500;
   res.status(status).json({
     success: false,
@@ -93,17 +94,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-// --- VERCEL EXPORT ---
-// Local development ke liye app.listen kaam karega, par production mein Vercel ise handle karega.
-if (NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => console.log(`🚀 Local Server: http://localhost:${PORT}`));
-}
+// --- START SERVER ---
+app.listen(PORT, () => {
+  console.log(`🚀 Server is live on port: ${PORT}`);
+  console.log(`🌍 Environment: ${NODE_ENV}`);
+});
 
-module.exports = app; // Vercel requires this export
-
-
-
+module.exports = app;
 
 
 
