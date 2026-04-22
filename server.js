@@ -13,13 +13,13 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected (Render Native)'))
+  .then(() => console.log('✅ MongoDB Connected (VIL Production)'))
   .catch((err) => {
     console.error('❌ MongoDB Error:', err.message);
     process.exit(1);
   });
 
-// --- UPDATED CORS CONFIGURATION ---
+// --- CORS CONFIGURATION ---
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.ADMIN_URL,
@@ -31,17 +31,10 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    // 1. Allow requests with no origin (like mobile/curl)
     if (!origin) return cb(null, true);
-
-    // 2. Allow if origin is in our list
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-
-    // 3. SPECIAL FIX: Allow any Vercel preview/latest deployment from your account
-    if (origin.endsWith('.vercel.app')) return cb(null, true);
-
-    // Otherwise block
-    console.warn(`⚠️ CORS Blocked for: ${origin}`);
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      return cb(null, true);
+    }
     cb(new Error(`CORS: ${origin} not allowed`));
   },
   credentials: true,
@@ -50,17 +43,30 @@ app.use(cors({
 }));
 
 // --- MIDDLEWARES ---
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({ 
+  contentSecurityPolicy: false, // Required for Cloudinary/external assets
+  crossOriginResourcePolicy: { policy: "cross-origin" } 
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 if (NODE_ENV !== 'production') app.use(morgan('dev'));
 
-// --- STATIC FILES ---
+// --- STATIC FILES & FOLDERS SETUP ---
+// Local folders create karein (Development ke liye aur temp storage ke liye)
 const uploadsPath = path.join(__dirname, 'public/uploads');
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath, { recursive: true });
-}
+const folders = [
+  'public/uploads/documents',
+  'public/uploads/images'
+];
+
+folders.forEach(dir => {
+  if (!fs.existsSync(path.join(__dirname, dir))) {
+    fs.mkdirSync(path.join(__dirname, dir), { recursive: true });
+  }
+});
+
+// Static Middleware: Ye tabhi kaam karega jab STORAGE_MODE local ho
 app.use('/uploads', express.static(uploadsPath));
 
 // --- ROUTES ---
@@ -75,20 +81,31 @@ app.use('/api/settings',       require('./routes/settings'));
 app.use('/api/pages',          require('./routes/pageContent'));
 app.use('/api/notifications',  require('./routes/notifications'));
 
+// --- HEALTH & STATUS ---
 app.get('/', (req, res) => res.send('Vaswani Industries Backend is Running...'));
 
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, status: 'ok', environment: NODE_ENV, time: new Date().toISOString() });
+  res.json({ 
+    success: true, 
+    status: 'ok', 
+    storage: process.env.STORAGE_MODE || 'local',
+    environment: NODE_ENV 
+  });
 });
 
+// --- GLOBAL ERROR HANDLER ---
 app.use((err, req, res, next) => {
   const status = err.status || 500;
+  console.error(`🔥 Error: ${err.message}`);
   res.status(status).json({
     success: false,
     message: NODE_ENV === 'production' ? 'Internal Server Error' : err.message
   });
 });
 
-app.listen(PORT, () => console.log(`🚀 Server on port: ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port: ${PORT}`);
+  console.log(`📦 Storage Mode: ${process.env.STORAGE_MODE || 'local'}`);
+});
 
 module.exports = app;
