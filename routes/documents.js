@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const Document = require('../models/Document');
 const { protect, adminOnly } = require('../middleware/auth');
-const { uploadPDF, buildFileUrl } = require('../middleware/upload');
+const { uploadPDF } = require('../middleware/upload');
 
 // Error Handler Wrapper for Multer
 function handleUpload(multerMiddleware) {
@@ -16,8 +16,64 @@ function handleUpload(multerMiddleware) {
     };
 }
 
+// @route   POST /api/documents
+// @desc    Upload PDF with ID-based naming (Fixes long internal paths)
+router.post('/', protect, adminOnly, handleUpload(uploadPDF.single('pdf')), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No file uploaded.' });
+        }
+
+        const { title, category, year, quarter, description } = req.body;
+
+        // 1. Create document first to get the MongoDB _id
+        const newDoc = new Document({
+            title,
+            category: category || 'others',
+            year,
+            quarter,
+            description,
+            uploadedBy: req.user._id
+        });
+
+        // 2. ID-based File Naming (Taaki /opt/render/ jaise path na dikhein)
+        const extension = path.extname(req.file.originalname);
+        const cleanFileName = `${newDoc._id}${extension}`; // e.g. 69e9b...pdf
+        const relativePath = `/uploads/documents/${category || 'others'}/${cleanFileName}`;
+        const absolutePath = path.join(__dirname, '../public', relativePath);
+
+        // Ensure target directory exists
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+
+        // 3. Move file from temp to final destination with clean ID name
+        fs.renameSync(req.file.path, absolutePath);
+
+        // 4. Set URLs (Using BACKEND_URL from Hostinger/Render config)
+        const domain = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+        
+        newDoc.fileName = req.file.originalname;
+        newDoc.filePath = relativePath;
+        newDoc.fileUrl = `${domain}${relativePath}`; // Clean public link
+        newDoc.fileSize = req.file.size;
+
+        await newDoc.save();
+
+        res.status(201).json({ 
+            success: true, 
+            message: 'Document uploaded successfully',
+            document: newDoc 
+        });
+
+    } catch (err) {
+        // Cleanup temp file if it exists and process fails
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        console.error(`Upload Error: ${err.message}`);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // @route   GET /api/documents
-// @desc    Get all docs with search and category filters
+// @desc    Get documents (Clean retrieval for frontend)
 router.get('/', async (req, res) => {
     try {
         const { category, search } = req.query;
@@ -36,78 +92,25 @@ router.get('/', async (req, res) => {
     }
 });
 
-// @route   POST /api/documents
-// @desc    Upload PDF (Handles Local or Cloudinary based on STORAGE_MODE)
-router.post('/', protect, adminOnly, handleUpload(uploadPDF.single('pdf')), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: 'File upload failed.' });
-        }
-
-        const { title, category, year, quarter, description } = req.body;
-        const isCloud = process.env.STORAGE_MODE === 'cloudinary';
-
-        // Logic to determine paths based on storage environment
-        // In Cloudinary, req.file.path is the full URL. In Local, it is a filename.
-        const fileUrl = isCloud ? req.file.path : buildFileUrl(`/uploads/documents/${category || 'others'}/${req.file.filename}`);
-        const filePath = isCloud ? req.file.path : `/uploads/documents/${category || 'others'}/${req.file.filename}`;
-
-        const newDoc = await Document.create({
-            title,
-            category: category || 'others',
-            year,
-            quarter,
-            description,
-            fileName: req.file.originalname,
-            filePath: filePath, // Used for local deletion/tracking
-            fileUrl: fileUrl,   // The link sent to the frontend
-            fileSize: req.file.size,
-            uploadedBy: req.user._id
-        });
-
-        res.status(201).json({ 
-            success: true, 
-            message: 'Document uploaded successfully',
-            document: newDoc 
-        });
-
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-
 // @route   DELETE /api/documents/:id
-// @desc    Delete document from DB and local storage (if applicable)
 router.delete('/:id', protect, adminOnly, async (req, res) => {
     try {
         const doc = await Document.findById(req.params.id);
-        
-        if (!doc) {
-            return res.status(404).json({ success: false, message: 'Document not found' });
-        }
+        if (!doc) return res.status(404).json({ success: false, message: 'Not found' });
 
-        // Only attempt local file deletion if NOT using Cloudinary
-        // and if the file is stored locally in the public folder
-        if (process.env.STORAGE_MODE !== 'cloudinary') {
-            const absolutePath = path.join(__dirname, '../public', doc.filePath);
-            
-            // Check if file exists before trying to delete (Avoids 500 errors on Render)
-            if (fs.existsSync(absolutePath)) {
-                try {
-                    fs.unlinkSync(absolutePath);
-                } catch (fileErr) {
-                    console.error(`Failed to delete physical file: ${fileErr.message}`);
-                }
+        // Safe local deletion
+        const absolutePath = path.join(__dirname, '../public', doc.filePath);
+        if (fs.existsSync(absolutePath)) {
+            try {
+                fs.unlinkSync(absolutePath);
+            } catch (e) {
+                console.error("File deletion failed, continuing with DB removal");
             }
         }
 
-        // If you need to delete from Cloudinary, add cloudinary.v2.uploader.destroy logic here
-
         await Document.findByIdAndDelete(req.params.id);
-
-        res.json({ success: true, message: 'Document deleted successfully' });
+        res.json({ success: true, message: 'Deleted successfully' });
     } catch (err) {
-        console.error(`Delete Error: ${err.message}`);
         res.status(500).json({ success: false, message: err.message });
     }
 });
